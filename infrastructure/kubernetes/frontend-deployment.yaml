@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: ${GOOGLE_ARTIFACT_REGISTRY}/frontend:latest
+        image: europe-west1-docker.pkg.dev/onyx-silo-459007-n1/advertising-repo/frontend:latest
         ports:
         - containerPort: 80
         resources:
@@ -35,4 +35,4 @@ spec:
   ports:
   - port: 80
     targetPort: 80
-  type: LoadBalancer
+  type: ClusterIP
