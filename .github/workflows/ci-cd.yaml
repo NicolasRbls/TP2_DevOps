@@ -1,0 +1,95 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PROJECT_ID: onyx-silo-459007-n1
+  GKE_CLUSTER: advertising-cluster
+  GKE_ZONE: europe-west1
+  REGISTRY: europe-west1-docker.pkg.dev
+  REPOSITORY: advertising-repo
+
+jobs:
+  setup-build-publish-deploy:
+    name: Setup, Build, Publish, and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    # Setup gcloud CLI
+    - uses: google-github-actions/setup-gcloud@v0.2.0
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: ${{ env.PROJECT_ID }}
+
+    # Configure Docker to use the gcloud command-line tool as a credential helper
+    - name: Configure Docker
+      run: |-
+        gcloud --quiet auth configure-docker ${{ env.REGISTRY }}
+
+    # Get the GKE credentials
+    - uses: google-github-actions/get-gke-credentials@v0.2.1
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GKE_ZONE }}
+        credentials: ${{ secrets.GCP_SA_KEY }}
+
+    # Build the Docker images
+    - name: Build Frontend
+      run: |-
+        docker build \
+          --tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}" \
+          --build-arg GITHUB_SHA="${{ github.sha }}" \
+          --build-arg GITHUB_REF="${{ github.ref }}" \
+          ./frontend
+
+    - name: Build Backend
+      run: |-
+        docker build \
+          --tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}" \
+          --build-arg GITHUB_SHA="${{ github.sha }}" \
+          --build-arg GITHUB_REF="${{ github.ref }}" \
+          ./backend
+
+    # Push the Docker images to Google Artifact Registry
+    - name: Publish Frontend
+      run: |-
+        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}"
+        docker tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}" "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest"
+        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest"
+
+    - name: Publish Backend
+      run: |-
+        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}"
+        docker tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}" "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest"
+        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest"
+
+    # Set up kustomize
+    - name: Set up Kustomize
+      run: |-
+        curl -sfLo kustomize https://github.com/kubernetes-sigs/kustomize/releases/download/v3.1.0/kustomize_3.1.0_linux_amd64
+        chmod u+x ./kustomize
+
+    # Deploy the Docker images to the GKE cluster
+    - name: Deploy
+      run: |-
+        export GOOGLE_ARTIFACT_REGISTRY="${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}"
+        export DB_CONNECTION_NAME=$(gcloud sql instances describe advertising-db-instance --format="value(connectionName)")
+        
+        # Remplacer les variables dans les fichiers de déploiement
+        envsubst < ./infrastructure/kubernetes/frontend-deployment.yaml > ./frontend-deployment.yaml
+        envsubst < ./infrastructure/kubernetes/backend-deployment.yaml > ./backend-deployment.yaml
+        
+        # Appliquer les fichiers de déploiement
+        kubectl apply -f ./frontend-deployment.yaml
+        kubectl apply -f ./backend-deployment.yaml
+        kubectl apply -f ./infrastructure/kubernetes/secrets.yaml
+        
+        # Afficher les services pour vérification
+        kubectl get services -o wide

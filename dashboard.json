@@ -1,0 +1,71 @@
+{
+  "displayName": "Advertising Campaign Application Dashboard",
+  "gridLayout": {
+    "columns": "2",
+    "widgets": [
+      {
+        "title": "CPU Usage by Pod",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"kubernetes.io/container/cpu/core_usage_time\" resource.type=\"k8s_container\" resource.label.\"cluster_name\"=\"advertising-cluster\"",
+                "aggregation": {
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              },
+              "unitOverride": "1"
+            }
+          }]
+        }
+      },
+      {
+        "title": "Memory Usage by Pod",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"kubernetes.io/container/memory/used_bytes\" resource.type=\"k8s_container\" resource.label.\"cluster_name\"=\"advertising-cluster\"",
+                "aggregation": {
+                  "perSeriesAligner": "ALIGN_MEAN"
+                }
+              },
+              "unitOverride": "By"
+            }
+          }]
+        }
+      },
+      {
+        "title": "Network Traffic",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"kubernetes.io/pod/network/received_bytes_count\" resource.type=\"k8s_pod\" resource.label.\"cluster_name\"=\"advertising-cluster\"",
+                "aggregation": {
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              },
+              "unitOverride": "By/s"
+            }
+          }]
+        }
+      },
+      {
+        "title": "Pod Status",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"kubernetes.io/pod/status/ready\" resource.type=\"k8s_pod\" resource.label.\"cluster_name\"=\"advertising-cluster\"",
+                "aggregation": {
+                  "perSeriesAligner": "ALIGN_MEAN"
+                }
+              }
+            }
+          }]
+        }
+      }
+    ]
+  }
+}

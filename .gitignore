@@ -1,0 +1,19 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+.terraformrc
+terraform.rc
+infrastructure/terraform/.terraform
+infrastructure/terraform/.terraform.lock.hcl
+
+# Envs & logs
+*.env
+*.env.*
+*.log
+
+# Systèmes
+.DS_Store
+Thumbs.db

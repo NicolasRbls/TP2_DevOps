@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: advertising
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+
+  backend:
+    build: ./backend
+    container_name: backend
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      PORT: 3001
+      DB_USER: postgres
+      DB_HOST: postgres
+      DB_NAME: advertising
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+      JWT_SECRET: votre_clé_secrète_super_sécurisée
+    ports:
+      - "3001:3001"
+    networks:
+      - app-network
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

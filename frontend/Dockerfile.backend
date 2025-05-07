@@ -1,0 +1,14 @@
+FROM node:16
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+# Modifier la configuration CORS directement
+RUN sed -i 's|origin: '\''http://localhost:3000'\'',|origin: '\''*'\'',|g' src/index.js
+
+EXPOSE 3001
+CMD ["node", "src/index.js"]
