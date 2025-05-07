@@ -12,6 +12,7 @@ spec:
       labels:
         app: backend
     spec:
+      serviceAccountName: <VOTRE_SA_K8S_AVEC_PERMISSION_SQL> # e.g. cloud-sql-accessor
       containers:
       - name: backend
         image: europe-west1-docker.pkg.dev/onyx-silo-459007-n1/advertising-repo/backend:latest
@@ -32,7 +33,7 @@ spec:
               name: db-credentials
               key: password
         - name: DB_HOST
-          value: "35.195.61.33"
+          value: "127.0.0.1"
         - name: DB_NAME
           value: "advertising"
         - name: DB_PORT
@@ -42,6 +43,12 @@ spec:
             secretKeyRef:
               name: jwt-secret
               key: value
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 5
         resources:
           requests:
             cpu: 100m
@@ -49,3 +56,20 @@ spec:
           limits:
             cpu: 200m
             memory: 256Mi
+      - name: cloud-sql-proxy
+        image: gcr.io/cloudsql-docker/gce-proxy:1.28.0
+        command:
+          - "/cloud_sql_proxy"
+          - "-instances=${PROJECT_ID}:europe-west1:advertising-db-instance=tcp:5432"
+        env:
+        - name: PROJECT_ID
+          value: "onyx-silo-459007-n1"
+        securityContext:
+          runAsNonRoot: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
