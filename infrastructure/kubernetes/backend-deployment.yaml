@@ -12,7 +12,7 @@ spec:
       labels:
         app: backend
     spec:
-      serviceAccountName: <VOTRE_SA_K8S_AVEC_PERMISSION_SQL> # e.g. cloud-sql-accessor
+      # pas besoin de serviceAccountName si on passe le JSON explicitement
       containers:
       - name: backend
         image: europe-west1-docker.pkg.dev/onyx-silo-459007-n1/advertising-repo/backend:latest
@@ -47,7 +47,7 @@ spec:
           httpGet:
             path: /healthz
             port: 3001
-          initialDelaySeconds: 10
+          initialDelaySeconds: 5
           periodSeconds: 5
         resources:
           requests:
@@ -56,14 +56,17 @@ spec:
           limits:
             cpu: 200m
             memory: 256Mi
+
       - name: cloud-sql-proxy
         image: gcr.io/cloudsql-docker/gce-proxy:1.28.0
         command:
           - "/cloud_sql_proxy"
-          - "-instances=${PROJECT_ID}:europe-west1:advertising-db-instance=tcp:5432"
-        env:
-        - name: PROJECT_ID
-          value: "onyx-silo-459007-n1"
+          - "-instances=onyx-silo-459007-n1:europe-west1:advertising-db-instance=tcp:5432"
+          - "-credential_file=/secrets/key.json"
+        volumeMounts:
+          - name: cloudsql-instance-credentials
+            mountPath: /secrets
+            readOnly: true
         securityContext:
           runAsNonRoot: true
         resources:
@@ -73,3 +76,8 @@ spec:
           limits:
             cpu: 100m
             memory: 128Mi
+
+      volumes:
+      - name: cloudsql-instance-credentials
+        secret:
+          secretName: cloudsql-instance-credentials
