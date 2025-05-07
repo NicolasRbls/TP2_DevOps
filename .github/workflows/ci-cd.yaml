@@ -2,94 +2,124 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 env:
   PROJECT_ID: onyx-silo-459007-n1
   GKE_CLUSTER: advertising-cluster
-  GKE_ZONE: europe-west1
+  GKE_ZONE: europe-west1-b
   REGISTRY: europe-west1-docker.pkg.dev
   REPOSITORY: advertising-repo
 
 jobs:
-  setup-build-publish-deploy:
-    name: Setup, Build, Publish, and Deploy
+  build-and-deploy:
+    name: Build and Deploy
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      # 1) Récupération du code
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    # Setup gcloud CLI
-    - uses: google-github-actions/setup-gcloud@v0.2.0
-      with:
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        project_id: ${{ env.PROJECT_ID }}
+      # 2) Authentification GCP via la clé JSON stockée dans le secret GCP_SA_KEY
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-    # Configure Docker to use the gcloud command-line tool as a credential helper
-    - name: Configure Docker
-      run: |-
-        gcloud --quiet auth configure-docker ${{ env.REGISTRY }}
+      # 3) Installation et configuration de gcloud
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          export_default_credentials: true
 
-    # Get the GKE credentials
-    - uses: google-github-actions/get-gke-credentials@v0.2.1
-      with:
-        cluster_name: ${{ env.GKE_CLUSTER }}
-        location: ${{ env.GKE_ZONE }}
-        credentials: ${{ secrets.GCP_SA_KEY }}
+      # 4) Configure Docker pour pouvoir pousser dans Artifact Registry
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
 
-    # Build the Docker images
-    - name: Build Frontend
-      run: |-
-        docker build \
-          --tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}" \
-          --build-arg GITHUB_SHA="${{ github.sha }}" \
-          --build-arg GITHUB_REF="${{ github.ref }}" \
-          ./frontend
+      # 5) Build & push de l'image Frontend
+      - name: Build and Push Frontend
+        run: |
+          cd frontend
+          echo "REACT_APP_API_URL=/api" > .env.production
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
+            .
+          docker push ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
 
-    - name: Build Backend
-      run: |-
-        docker build \
-          --tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}" \
-          --build-arg GITHUB_SHA="${{ github.sha }}" \
-          --build-arg GITHUB_REF="${{ github.ref }}" \
-          ./backend
+      # 6) Build & push de l'image Backend
+      - name: Build and Push Backend
+        run: |
+          cd backend
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
+            .
+          docker push ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
 
-    # Push the Docker images to Google Artifact Registry
-    - name: Publish Frontend
-      run: |-
-        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}"
-        docker tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}" "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest"
-        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest"
+      # 7) Récupération des credentials du cluster GKE
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v1
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_ZONE }}
 
-    - name: Publish Backend
-      run: |-
-        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}"
-        docker tag "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}" "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest"
-        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:latest"
+      # 8) Déploiement sur GKE
+      - name: Deploy to GKE
+        run: |
+          # BackendConfig pour le health check
+          cat <<EOF | kubectl apply -f -
+          apiVersion: cloud.google.com/v1
+          kind: BackendConfig
+          metadata:
+            name: backend-config
+          spec:
+            healthCheck:
+              checkIntervalSec: 15
+              timeoutSec: 15
+              healthyThreshold: 1
+              unhealthyThreshold: 2
+              type: HTTP
+              requestPath: /
+              port: 3001
+          EOF
 
-    # Set up kustomize
-    - name: Set up Kustomize
-      run: |-
-        curl -sfLo kustomize https://github.com/kubernetes-sigs/kustomize/releases/download/v3.1.0/kustomize_3.1.0_linux_amd64
-        chmod u+x ./kustomize
+          # Mise à jour des images dans les deployments
+          kubectl set image deployment/backend \
+            backend=${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+          kubectl set image deployment/frontend \
+            frontend=${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
 
-    # Deploy the Docker images to the GKE cluster
-    - name: Deploy
-      run: |-
-        export GOOGLE_ARTIFACT_REGISTRY="${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}"
-        export DB_CONNECTION_NAME=$(gcloud sql instances describe advertising-db-instance --format="value(connectionName)")
-        
-        # Remplacer les variables dans les fichiers de déploiement
-        envsubst < ./infrastructure/kubernetes/frontend-deployment.yaml > ./frontend-deployment.yaml
-        envsubst < ./infrastructure/kubernetes/backend-deployment.yaml > ./backend-deployment.yaml
-        
-        # Appliquer les fichiers de déploiement
-        kubectl apply -f ./frontend-deployment.yaml
-        kubectl apply -f ./backend-deployment.yaml
-        kubectl apply -f ./infrastructure/kubernetes/secrets.yaml
-        
-        # Afficher les services pour vérification
-        kubectl get services -o wide
+          # Ingress avec annotation de BackendConfig
+          cat <<EOF | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: advertising-ingress
+            annotations:
+              kubernetes.io/ingress.class: gce
+              cloud.google.com/backend-config: '{"default":"backend-config"}'
+          spec:
+            rules:
+              - http:
+                  paths:
+                    - path: /api
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: backend
+                          port:
+                            number: 80
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: frontend
+                          port:
+                            number: 80
+          EOF
