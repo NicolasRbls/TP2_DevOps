@@ -15,6 +15,7 @@ spec:
       containers:
         - name: backend
           image: europe-west1-docker.pkg.dev/onyx-silo-459007-n1/advertising-repo/backend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3001
           env:
@@ -28,7 +29,7 @@ spec:
                   name: pg-password-secret
                   key: password
             - name: DB_HOST
-              value: "35.195.61.33"     # IP publique PRIMARY de Cloud SQL
+              value: "35.195.61.33"
             - name: DB_NAME
               value: "advertising"
             - name: DB_PORT
