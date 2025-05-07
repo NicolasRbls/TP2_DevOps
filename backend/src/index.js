@@ -28,6 +28,10 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
+// Health check pour GKE/L7
+app.get('/healthz', (_req, res) => res.send('ok'));
+
+
 // Routes d'authentification
 // Inscription
 app.post('/api/auth/register', async (req, res) => {
